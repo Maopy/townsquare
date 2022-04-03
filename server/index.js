@@ -1,5 +1,5 @@
 const fs = require("fs");
-const https = require("https");
+const http = require("http");
 const WebSocket = require("ws");
 const client = require("prom-client");
 
@@ -14,12 +14,12 @@ const PING_INTERVAL = 30000; // 30 seconds
 
 const options = {};
 
-if (process.env.NODE_ENV !== "development") {
-  options.cert = fs.readFileSync("cert.pem");
-  options.key = fs.readFileSync("key.pem");
-}
+// if (process.env.NODE_ENV !== "development") {
+//   options.cert = fs.readFileSync("cert.pem");
+//   options.key = fs.readFileSync("key.pem");
+// }
 
-const server = https.createServer(options);
+const server = http.createServer(options);
 const wss = new WebSocket.Server({
   ...(process.env.NODE_ENV === "development" ? { port: 8081 } : { server }),
   verifyClient: info =>
@@ -137,6 +137,7 @@ wss.on("connection", function connection(ws, req) {
   ws.on("pong", heartbeat);
   // handle message
   ws.on("message", function incoming(data) {
+    const msg = data.toString()
     metrics.messages_incoming.inc();
     // check rate limit (max 5msg/second)
     ws.counter++;
@@ -149,7 +150,7 @@ wss.on("connection", function connection(ws, req) {
       metrics.connection_terminated_spam.inc();
       return;
     }
-    const messageType = data
+    const messageType = msg
       .toLocaleLowerCase()
       .substr(1)
       .split(",", 1)
@@ -164,7 +165,7 @@ wss.on("connection", function connection(ws, req) {
             (ws.playerId === "host" || client.playerId === "host")
           ) {
             client.send(
-              data.replace(/latency/, (client.latency || 0) + (ws.latency || 0))
+              msg.replace(/latency/, (client.latency || 0) + (ws.latency || 0))
             );
             metrics.messages_outgoing.inc();
           }
@@ -177,10 +178,10 @@ wss.on("connection", function connection(ws, req) {
           wss.clients.size,
           ws.channel,
           ws.playerId,
-          data
+          msg
         );
         try {
-          const dataToPlayer = JSON.parse(data)[1];
+          const dataToPlayer = JSON.parse(msg)[1];
           channels[ws.channel].forEach(function each(client) {
             if (
               client !== ws &&
@@ -202,11 +203,11 @@ wss.on("connection", function connection(ws, req) {
           wss.clients.size,
           ws.channel,
           ws.playerId,
-          data
+          msg
         );
         channels[ws.channel].forEach(function each(client) {
           if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(data);
+            client.send(msg);
             metrics.messages_outgoing.inc();
           }
         });
@@ -252,7 +253,7 @@ wss.on("close", function close() {
 // prod mode with stats API
 if (process.env.NODE_ENV !== "development") {
   console.log("server starting");
-  server.listen(8080);
+  server.listen(8081);
   server.on("request", (req, res) => {
     res.setHeader("Content-Type", register.contentType);
     register.metrics().then(out => res.end(out));
